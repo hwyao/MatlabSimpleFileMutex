@@ -194,6 +194,10 @@ classdef SimpleFileMutex < handle
                     try 
                         obj.fileLock = obj.lockChannel.tryLock();
                     catch ME
+                        % This exception 
+                        % - WILL NOT happen when a second tryLock() in another process (MATLAB window)
+                        % - WILL happen when a second tryLock() in same process (MATLAB window)
+                        % To keep it working for most scenarios, we will handle this
                         if isa(ME.ExceptionObject, 'java.nio.channels.OverlappingFileLockException')
                             obj.fileLock = [];
                         else

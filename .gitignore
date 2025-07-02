@@ -37,3 +37,4 @@ derived/
 
 # output folder for example txt
 example/mutex_demo.txt
+*.drawio
