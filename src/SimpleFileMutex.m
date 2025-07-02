@@ -125,6 +125,7 @@ classdef SimpleFileMutex < handle
             if obj.isLocked
                 obj.unlock();
             end
+            cleanupJavaObjects(obj)
         end
         
         function lock(obj)
@@ -171,8 +172,16 @@ classdef SimpleFileMutex < handle
                     obj.lockChannel = obj.lockFile.getChannel();
                     
                     % Try to acquire exclusive lock (non-blocking first attempt)
-                    obj.fileLock = obj.lockChannel.tryLock();
-                    
+                    try 
+                        obj.fileLock = obj.lockChannel.tryLock();
+                    catch ME
+                        if isa(ME.ExceptionObject, 'java.nio.channels.OverlappingFileLockException')
+                            obj.fileLock = [];
+                        else
+                            rethrow(ME);
+                        end
+                    end
+
                     if ~isempty(obj.fileLock)
                         % Successfully acquired lock
                         % Write process information to the lock file
