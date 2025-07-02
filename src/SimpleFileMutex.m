@@ -21,7 +21,10 @@ classdef SimpleFileMutex < handle
         unexpectedRetryCount = 0; 
 
         % Pause time between lock attempts in seconds
-        pauseTimeByLocking  
+        pauseTimeByLocking
+
+        % Maximum waiting time for lock acquisition in seconds. Zero means no limit.
+        maxWaitTime
 
         % Java RandomAccessFile object for the lock file
         lockFile
@@ -44,6 +47,7 @@ classdef SimpleFileMutex < handle
             %   obj = SimpleFileMutex(filePath)
             %   obj = SimpleFileMutex(filePath, 'UnexpectedRetryMax', value)
             %   obj = SimpleFileMutex(filePath, 'PauseTimeByLocking', value)
+            %   obj = SimpleFileMutex(filePath, 'MaxWaitTime', value)
             %
             % Input Arguments:
             %   filePath - String or char array specifying the path to an existing file 
@@ -56,6 +60,9 @@ classdef SimpleFileMutex < handle
             %                          acquisition. Default is 20.
             %   'PauseTimeByLocking' - Positive number specifying the pause time in seconds
             %                          between lock acquisition attempts. Default is 0.1.
+            %   'MaxWaitTime' - Non-negative number specifying the maximum waiting time 
+            %                   in seconds for lock acquisition. Zero means no limit. 
+            %                   Default is 0.
             %
             % Output Arguments:
             %   obj - SimpleFileMutex object instance
@@ -64,8 +71,8 @@ classdef SimpleFileMutex < handle
             %   % Basic usage
             %   mutex = SimpleFileMutex('myfile.txt');
             %
-            %   % With custom retry limit and pause time
-            %   mutex = SimpleFileMutex('myfile.txt', 'UnexpectedRetryMax', 50, 'PauseTimeByLocking', 0.05);
+            %   % With custom retry limit, pause time, and maximum wait time
+            %   mutex = SimpleFileMutex('myfile.txt', 'UnexpectedRetryMax', 50, 'PauseTimeByLocking', 0.05, 'MaxWaitTime', 30);
 
             % validate required filePath not empty, is a string or char array, and file exists
             if nargin < 1 || isempty(filePath)
@@ -85,6 +92,7 @@ classdef SimpleFileMutex < handle
             p = inputParser;
             addParameter(p, 'UnexpectedRetryMax', 20, @(x) isnumeric(x) && isscalar(x) && x >= 0 && floor(x) == x);
             addParameter(p, 'PauseTimeByLocking', 0.1, @(x) isnumeric(x) && isscalar(x) && x > 0);
+            addParameter(p, 'MaxWaitTime', 0, @(x) isnumeric(x) && isscalar(x) && x >= 0);
             parse(p, varargin{:});
             
             % Initialize properties
@@ -92,6 +100,7 @@ classdef SimpleFileMutex < handle
             obj.isLocked = false;
             obj.unexpectedRetryMax = p.Results.UnexpectedRetryMax;
             obj.pauseTimeByLocking = p.Results.PauseTimeByLocking;
+            obj.maxWaitTime = p.Results.MaxWaitTime;
             obj.processId = sprintf('MATLAB_%d', feature('getpid'));
             
             % Create lock file path
@@ -145,11 +154,13 @@ classdef SimpleFileMutex < handle
             %   - Uses Java RandomAccessFile and FileChannel for locking
             %   - Creates a .lock file alongside the target file
             %   - Blocks until lock is acquired or maximum retries exceeded
+            %   - Respects maxWaitTime limit if set (0 means no limit)
             %   - Handles unexpected errors with configurable retry mechanism
             %
             % Exceptions:
             %   SimpleFileMutex:AlreadyLocked - If this instance already holds the lock
             %   SimpleFileMutex:MaxRetriesExceeded - If maximum retry limit is reached
+            %   SimpleFileMutex:TimeoutExceeded - If maxWaitTime is exceeded
             %   SimpleFileMutex:LockFailed - If unexpected errors occur during acquisition
             %
             % Examples:
@@ -164,8 +175,16 @@ classdef SimpleFileMutex < handle
             end
 
             obj.unexpectedRetryCount = 0;
+            startTime = tic;
             
             while true
+                % Check for timeout if maxWaitTime is set
+                if obj.maxWaitTime > 0 && toc(startTime) > obj.maxWaitTime
+                    error('SimpleFileMutex:TimeoutExceeded', ...
+                          'Maximum wait time (%.2f seconds) exceeded while trying to acquire lock', ...
+                          obj.maxWaitTime);
+                end
+                
                 try
                     % Create or open the lock file using Java
                     obj.lockFile = java.io.RandomAccessFile(obj.lockFilePath, 'rw');

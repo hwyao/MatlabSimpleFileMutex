@@ -3,16 +3,12 @@ classdef SimpleFileMutexTest < matlab.unittest.TestCase
     % This test class verifies the functionality of the SimpleFileMutex
     % including concurrent access protection
     
-    properties (TestParameter)
-        numberOfThreads = {2, 5, 10}
-        writesPerThread = {10, 20, 50}
-    end
-    
     properties
         testFile
         testDir
         mutex
         lockFile
+        timingTolerance = 0.1  % Adjust this value if system performance is insufficient
     end
 
     methods (TestMethodSetup)
@@ -90,10 +86,6 @@ classdef SimpleFileMutexTest < matlab.unittest.TestCase
                 'Lock file should not exist after unlock()');
         end
         
-        % function testConcurrentFileWrites(testCase, numberOfThreads, writesPerThread)
-            
-        % end
-        
         function testConstructorInvalidInputs(testCase)
             % Test constructor with invalid input arguments
             
@@ -134,6 +126,10 @@ classdef SimpleFileMutexTest < matlab.unittest.TestCase
                 'MATLAB:InputParser:ArgumentFailedValidation', ...
                 'Should throw error for non-integer UnexpectedRetryMax');
             
+            testCase.verifyError(@() SimpleFileMutex(testCase.testFile, 'UnexpectedRetryMax', 'invalid'), ...
+                'MATLAB:InputParser:ArgumentFailedValidation', ...
+                'Should throw error for non-numeric UnexpectedRetryMax');
+            
             % Test invalid PauseTimeByLocking parameters
             testCase.verifyError(@() SimpleFileMutex(testCase.testFile, 'PauseTimeByLocking', 0), ...
                 'MATLAB:InputParser:ArgumentFailedValidation', ...
@@ -142,6 +138,49 @@ classdef SimpleFileMutexTest < matlab.unittest.TestCase
             testCase.verifyError(@() SimpleFileMutex(testCase.testFile, 'PauseTimeByLocking', -0.1), ...
                 'MATLAB:InputParser:ArgumentFailedValidation', ...
                 'Should throw error for negative PauseTimeByLocking');
+            
+            testCase.verifyError(@() SimpleFileMutex(testCase.testFile, 'PauseTimeByLocking', 'invalid'), ...
+                'MATLAB:InputParser:ArgumentFailedValidation', ...
+                'Should throw error for non-numeric PauseTimeByLocking');
+            
+            % Test invalid MaxWaitTime parameters
+            testCase.verifyError(@() SimpleFileMutex(testCase.testFile, 'MaxWaitTime', -1), ...
+                'MATLAB:InputParser:ArgumentFailedValidation', ...
+                'Should throw error for negative MaxWaitTime');
+            
+            testCase.verifyError(@() SimpleFileMutex(testCase.testFile, 'MaxWaitTime', 'invalid'), ...
+                'MATLAB:InputParser:ArgumentFailedValidation', ...
+                'Should throw error for non-numeric MaxWaitTime');
+        end
+
+        function testDefaultParameters(testCase)
+            % Test that constructor sets correct default parameter values
+            
+            % Use the default mutex created in setupTest
+            % Verify default values match the documented defaults
+            testCase.verifyEqual(testCase.mutex.unexpectedRetryMax, 20, ...
+                'Default unexpectedRetryMax should be 20');
+            testCase.verifyEqual(testCase.mutex.pauseTimeByLocking, 0.1, ...
+                'Default pauseTimeByLocking should be 0.1');
+            testCase.verifyEqual(testCase.mutex.maxWaitTime, 0, ...
+                'Default maxWaitTime should be 0');
+            
+            % Verify other initialized properties
+            testCase.verifyEqual(testCase.mutex.targetFilePath, testCase.testFile, ...
+                'Target file path should match input');
+            testCase.verifyFalse(testCase.mutex.isLocked, ...
+                'Mutex should not be locked initially');
+            testCase.verifyEqual(testCase.mutex.unexpectedRetryCount, 0, ...
+                'Unexpected retry count should be 0 initially');
+            
+            % Verify processId format
+            testCase.verifyMatches(testCase.mutex.processId, 'MATLAB_\d+', ...
+                'Process ID should match MATLAB_<number> format');
+            
+            % Verify lock file path
+            expectedLockPath = [testCase.testFile '.lock'];
+            testCase.verifyEqual(testCase.mutex.lockFilePath, expectedLockPath, ...
+                'Lock file path should be target file path with .lock extension');
         end
         
         function testUnlockNotLocked(testCase)
@@ -212,9 +251,9 @@ classdef SimpleFileMutexTest < matlab.unittest.TestCase
                 'Unlock timer should have stopped');
             delete(unlockTimer);
             
-            % Verify timing - should be at least 4 seconds
-            testCase.verifyGreaterThan(elapsedTime, 4.9, ...
-                'Second mutex should wait at least 4.9 seconds');
+            % Verify timing - should be approximately 5 seconds
+            testCase.verifyEqual(elapsedTime, 5, 'AbsTol', testCase.timingTolerance, ...
+                sprintf('Second mutex should wait approximately 5 seconds (±%.1fs). If this test fails frequently, consider increasing timingTolerance due to system performance limitations.', testCase.timingTolerance));
             
             % Verify second mutex now has the lock
             testCase.verifyTrue(isfile(testCase.lockFile), ...
@@ -241,6 +280,73 @@ classdef SimpleFileMutexTest < matlab.unittest.TestCase
             testCase.mutex.unlock();
             testCase.verifyFalse(isfile(testCase.lockFile), ...
                 'Lock file should not exist after final unlock()');
+        end
+
+        function testMaxWaitTime(testCase)
+            % Test that mutex respects the maximum wait time
+            
+            % Test 1: MaxWaitTime = 5s, unlock after 2s, should succeed
+            mutex2 = SimpleFileMutex(testCase.testFile, 'MaxWaitTime', 5);
+            
+            % Lock first mutex
+            testCase.mutex.lock();
+            testCase.verifyTrue(testCase.mutex.isLocked, 'First mutex should be locked');
+            
+            % Create timer to unlock first mutex after 2 seconds
+            unlockTimer1 = timer('ExecutionMode', 'singleShot', ...
+                                'StartDelay', 2, ...
+                                'TimerFcn', @(~,~) testCase.mutex.unlock());
+            start(unlockTimer1);
+            
+            % Record start time and try to lock second mutex (should succeed)
+            startTime1 = tic;
+            mutex2.lock();  % Should succeed within 5s timeout
+            elapsedTime1 = toc(startTime1);
+            
+            % Clean up timer
+            delete(unlockTimer1);
+            
+            % Verify timing and lock acquisition
+            testCase.verifyEqual(elapsedTime1, 2, 'AbsTol', testCase.timingTolerance, ...
+                sprintf('Should wait approximately 2 seconds (±%.1fs). If this test fails frequently, consider increasing timingTolerance due to system performance limitations.', testCase.timingTolerance));
+            testCase.verifyTrue(mutex2.isLocked, 'Second mutex should be locked');
+            testCase.verifyFalse(testCase.mutex.isLocked, 'First mutex should be unlocked');
+            
+            % Unlock second mutex for next test
+            mutex2.unlock();
+            
+            % Test 2: MaxWaitTime = 5s, unlock after 8s, should timeout
+            % Lock first mutex again
+            testCase.mutex.lock();
+            testCase.verifyTrue(testCase.mutex.isLocked, 'First mutex should be locked for second test');
+            
+            % Create timer to unlock first mutex after 8 seconds
+            unlockTimer2 = timer('ExecutionMode', 'singleShot', ...
+                                'StartDelay', 8, ...
+                                'TimerFcn', @(~,~) testCase.mutex.unlock());
+            start(unlockTimer2);
+            
+            % Try to lock second mutex (should timeout after 5s)
+            startTime2 = tic;
+            testCase.verifyError(@() mutex2.lock(), ...
+                'SimpleFileMutex:TimeoutExceeded', ...
+                'Second mutex should timeout after 5 seconds');
+            elapsedTime2 = toc(startTime2);
+            
+            % Clean up timer
+            testCase.verifyTrue(strcmp(unlockTimer2.Running, 'on'), ...
+                'Unlock timer should still be running');
+            stop(unlockTimer2);
+            delete(unlockTimer2);
+            
+            % Verify timeout behavior
+            testCase.verifyEqual(elapsedTime2, 5, 'AbsTol', testCase.timingTolerance, ...
+                sprintf('Should timeout after approximately 5 seconds (±%.1fs). If this test fails frequently, consider increasing timingTolerance due to system performance limitations.', testCase.timingTolerance));
+            testCase.verifyFalse(mutex2.isLocked, 'Second mutex should not be locked after timeout');
+            testCase.verifyTrue(testCase.mutex.isLocked, 'First mutex should still be locked');
+            
+            % Clean up - unlock first mutex
+            testCase.mutex.unlock();
         end
 
         function testMultipleLockUnlockCycles(testCase)
