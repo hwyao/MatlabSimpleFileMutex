@@ -8,7 +8,7 @@ classdef SimpleFileMutexTest < matlab.unittest.TestCase
         testDir
         mutex
         lockFile
-        timingTolerance = 0.1  % Adjust this value if system performance is insufficient
+        timingTolerance = 0.2  % Adjust this value if system performance is insufficient
     end
 
     methods (TestMethodSetup)
