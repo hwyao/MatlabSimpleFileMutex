@@ -1,5 +1,7 @@
 # MatlabSimpleFileMutex
 
+[![Matlab test and code coverage](https://github.com/hwyao/MatlabSimpleFileMutex/actions/workflows/workflow.yml/badge.svg)](https://github.com/hwyao/MatlabSimpleFileMutex/actions/workflows/workflow.yml) [![codecov](https://codecov.io/gh/hwyao/MatlabSimpleFileMutex/graph/badge.svg?token=F4TZS4UAZJ)](https://codecov.io/gh/hwyao/MatlabSimpleFileMutex)
+
 A simple file-based mutex implementation for MATLAB that provides cross-process synchronization using Java FileLock mechanism. This tool helps prevent race conditions when multiple MATLAB processes (e.g. multiple MATLAB Windows) that need to access the same file concurrently.
 
 ![title_figure](./img/READ_title.drawio.png)
