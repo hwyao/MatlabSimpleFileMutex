@@ -1,0 +1,43 @@
+name: Matlab test and code coverage
+
+on:
+  push:
+    branches:
+      - main 
+  pull_request:
+    branches: 
+      - main 
+      - develop
+  schedule:
+    - cron: '0 0 1,16 * *' 
+
+jobs:
+  matlab-test:
+    name: Run MATLAB Tests and Coverage
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout 
+        uses: actions/checkout@v4
+
+      - name: Set up MATLAB
+        uses: matlab-actions/setup-matlab@v2
+
+      - name: Run tests and generate results
+        uses: matlab-actions/run-tests@v2
+        with:
+          source-folder: src
+          test-results-junit: junit.xml
+          code-coverage-cobertura: coverage.xml
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          file: coverage.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload test results to Codecov
+        if: ${{ !cancelled() }}
+        uses: codecov/test-results-action@v1
+        with:
+          file: junit.xml
+          token: ${{ secrets.CODECOV_TOKEN }}
